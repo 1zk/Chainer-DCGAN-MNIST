@@ -105,7 +105,7 @@ class GAN_Updater(training.StandardUpdater):
         loss = loss_gen + loss_data
 
         for optimizer in self._optimizers.values():
-            optimizer.zero_grads()
+            optimizer.target.cleargrads()
 
         # compute gradients all at once
         loss.backward()
