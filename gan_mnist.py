@@ -45,7 +45,8 @@ class Discriminator(Chain):
 
     def __init__(self):
         super(Discriminator, self).__init__(
-            l1=L.Convolution2D(None, 32, 3, 2, 1),  # in_ch,out_ch,ksize,stride,pad
+            # in_ch,out_ch,ksize,stride,pad
+            l1=L.Convolution2D(None, 32, 3, 2, 1),
             bn1=L.BatchNormalization(32),
             l2=L.Convolution2D(None, 32, 3, 2, 2),
             bn2=L.BatchNormalization(32),
@@ -67,8 +68,8 @@ class Discriminator(Chain):
 
 class GAN_Updater(training.StandardUpdater):
 
-    def __init__(self, iterator, generator, discriminator, optimizers, batchsize, converter=convert.concat_examples,
-                 device=None, z_dim=2,):
+    def __init__(self, iterator, generator, discriminator, optimizers, batchsize,
+                 converter=convert.concat_examples, device=None, z_dim=2,):
         if isinstance(iterator, iterator_module.Iterator):
             iterator = {'main': iterator}
         self._iterators = iterator
@@ -91,27 +92,29 @@ class GAN_Updater(training.StandardUpdater):
             size=(self.batchsize, self.z_dim), dtype=np.float32))
         global x_gen
         x_gen = self.gen(z)
-        
+
         # concatしないままdisに通すと、bnが悪さをする
-        x = F.concat((x_gen, x_data), 0) 
+        x = F.concat((x_gen, x_data), 0)
         y = self.dis(x)
         y_gen, y_data = F.split_axis(y, 2, 0)
-        
+
         # sigmoid_cross_entropy(x, 0) == softplus(x)
         # sigmoid_cross_entropy(x, 1) == softplus(-x)
         loss_gen = F.sum(F.softplus(-y_gen)) / self.batchsize
         loss_data = F.sum(F.softplus(y_data)) / self.batchsize
         loss = loss_gen + loss_data
 
-        self._optimizers['gen'].zero_grads()
-        self._optimizers['dis'].zero_grads()
+        for optimizer in self._optimizers.values():
+            optimizer.zero_grads()
 
+        # compute gradients all at once
         loss.backward()
 
-        self._optimizers['gen'].update()
-        self._optimizers['dis'].update()
+        for optimizer in self._optimizers.values():
+            optimizer.update()
 
-        reporter.report({'loss': loss, 'loss_gen': loss_gen, 'loss_data': loss_data})
+        reporter.report(
+            {'loss': loss, 'loss_gen': loss_gen, 'loss_data': loss_data})
 
 
 def save_x(x_gen):
@@ -119,9 +122,11 @@ def save_x(x_gen):
     n = x_gen_img.shape[0]
     n = n // 15 * 15
     x_gen_img = x_gen_img[:n]
-    x_gen_img = x_gen_img.reshape(15, -1, 28, 28).transpose(1, 2, 0, 3).reshape(-1, 15*28)
+    x_gen_img = x_gen_img.reshape(
+        15, -1, 28, 28).transpose(1, 2, 0, 3).reshape(-1, 15 * 28)
     imsave('x_gen.png', x_gen_img)
-        
+
+
 def main():
     parser = argparse.ArgumentParser(description='GAN_MNIST')
     parser.add_argument('--batchsize', '-b', type=int, default=100,
@@ -144,18 +149,19 @@ def main():
     print('# epoch: {}'.format(args.epoch))
     print('')
 
-    train, test = datasets.get_mnist(withlabel=False, ndim=3)
-    train_iter = iterators.SerialIterator(train, batch_size=args.batchsize)
-
     gen = Generator(args.z_dim)
     dis = Discriminator()
     gen.to_gpu()
     dis.to_gpu()
 
-    opt = {'gen': optimizers.Adam(alpha=-0.001, beta1=0.5), # alphaの符号が重要
+    opt = {'gen': optimizers.Adam(alpha=-0.001, beta1=0.5),  # alphaの符号が重要
            'dis': optimizers.Adam(alpha=0.001, beta1=0.5)}
     opt['gen'].setup(gen)
     opt['dis'].setup(dis)
+
+    train, test = datasets.get_mnist(withlabel=False, ndim=3)
+
+    train_iter = iterators.SerialIterator(train, batch_size=args.batchsize)
 
     updater = GAN_Updater(train_iter, gen, dis, opt,
                           batchsize=args.batchsize, device=args.gpu, z_dim=args.z_dim)
@@ -173,9 +179,10 @@ def main():
         chainer.serializers.load_npz(args.resume, trainer)
 
     trainer.run()
+
     np.save('x_gen.npy', cuda.to_cpu(x_gen.data))
     save_x(x_gen)
-    
-    
+
+
 if __name__ == '__main__':
     main()
