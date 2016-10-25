@@ -6,6 +6,6 @@ Some of the techniques presented in the paper "Improved Techniques for Training 
 <img src="/x_gen_example_.png"/>
 ## Usage
     python gan_mnist.py -g 0 -b 150 -e 200
-If there is no GPU, specify `-g -1`.
+If there is no GPU, this program does not work.
 ## Requirement
 Chainer v1.15.0+
