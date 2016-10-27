@@ -133,7 +133,7 @@ def save_x(x_gen):
 
 def main():
     parser = argparse.ArgumentParser(description='GAN_MNIST')
-    parser.add_argument('--batchsize', '-b', type=int, default=100,
+    parser.add_argument('--batchsize', '-b', type=int, default=200,
                         help='Number of images in each mini-batch')
     parser.add_argument('--epoch', '-e', type=int, default=30,
                         help='Number of sweeps over the dataset to train')
