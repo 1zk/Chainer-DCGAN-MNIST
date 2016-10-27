@@ -30,13 +30,13 @@ class Generator(Chain):
             bn4=L.BatchNormalization(128),
             l5=L.Deconvolution2D(128, 1, 3, 2, 2, outsize=(28, 28)),
         )
+        self.train = True
 
     def __call__(self, z):
-        z = F.reshape(z, (z.data.shape[0], -1, 1, 1))
-        h = self.bn1(F.relu(self.l1(z)))
-        h = self.bn2(F.relu(self.l2(h)))
-        h = self.bn3(F.relu(self.l3(h)))
-        h = self.bn4(F.relu(self.l4(h)))
+        h = self.bn1(F.relu(self.l1(z)), test=not self.train)
+        h = self.bn2(F.relu(self.l2(h)), test=not self.train)
+        h = self.bn3(F.relu(self.l3(h)), test=not self.train)
+        h = self.bn4(F.relu(self.l4(h)), test=not self.train)
         x = F.sigmoid(self.l5(h))
         return x
 
@@ -56,19 +56,20 @@ class Discriminator(Chain):
             bn4=L.BatchNormalization(32),
             l5=L.Convolution2D(None, 1, 3, 2, 1),
         )
+        self.train = True
 
     def __call__(self, x):
-        h = self.bn1(F.leaky_relu(self.l1(x)))
-        h = self.bn2(F.leaky_relu(self.l2(h)))
-        h = self.bn3(F.leaky_relu(self.l3(h)))
-        h = self.bn4(F.leaky_relu(self.l4(h)))
-        y = F.flatten(self.l5(h))
+        h = self.bn1(F.leaky_relu(self.l1(x)), test=not self.train)
+        h = self.bn2(F.leaky_relu(self.l2(h)), test=not self.train)
+        h = self.bn3(F.leaky_relu(self.l3(h)), test=not self.train)
+        h = self.bn4(F.leaky_relu(self.l4(h)), test=not self.train)
+        y = self.l5(h)
         return y
 
 
 class GAN_Updater(training.StandardUpdater):
 
-    def __init__(self, iterator, generator, discriminator, optimizers, batchsize,
+    def __init__(self, iterator, generator, discriminator, optimizers,
                  converter=convert.concat_examples, device=None, z_dim=2,):
         if isinstance(iterator, iterator_module.Iterator):
             iterator = {'main': iterator}
@@ -82,14 +83,15 @@ class GAN_Updater(training.StandardUpdater):
         self.iteration = 0
 
         self.z_dim = z_dim
-        self.batchsize = batchsize
 
     def update_core(self):
         batch = self._iterators['main'].next()
         in_arrays = self.converter(batch, self.device)
         x_data = in_arrays
+
+        batchsize = x_data.shape[0]
         z = Variable(cuda.cupy.random.normal(
-            size=(self.batchsize, self.z_dim), dtype=np.float32))
+            size=(batchsize, self.z_dim, 1, 1), dtype=np.float32))
         global x_gen
         x_gen = self.gen(z)
 
@@ -100,9 +102,9 @@ class GAN_Updater(training.StandardUpdater):
 
         # sigmoid_cross_entropy(x, 0) == softplus(x)
         # sigmoid_cross_entropy(x, 1) == softplus(-x)
-        loss_gen = F.sum(F.softplus(-y_gen)) / self.batchsize
-        loss_data = F.sum(F.softplus(y_data)) / self.batchsize
-        loss = loss_gen + loss_data
+        loss_gen = F.sum(F.softplus(-y_gen))
+        loss_data = F.sum(F.softplus(y_data))
+        loss = (loss_gen + loss_data) / batchsize
 
         for optimizer in self._optimizers.values():
             optimizer.target.cleargrads()
@@ -114,7 +116,9 @@ class GAN_Updater(training.StandardUpdater):
             optimizer.update()
 
         reporter.report(
-            {'loss': loss, 'loss_gen': loss_gen, 'loss_data': loss_data})
+            {'loss': loss,
+             'loss_gen': loss_gen / batchsize,
+             'loss_data': loss_data / batchsize})
 
 
 def save_x(x_gen):
@@ -131,9 +135,9 @@ def main():
     parser = argparse.ArgumentParser(description='GAN_MNIST')
     parser.add_argument('--batchsize', '-b', type=int, default=100,
                         help='Number of images in each mini-batch')
-    parser.add_argument('--epoch', '-e', type=int, default=20,
+    parser.add_argument('--epoch', '-e', type=int, default=30,
                         help='Number of sweeps over the dataset to train')
-    parser.add_argument('--gpu', '-g', type=int, default=-1,
+    parser.add_argument('--gpu', '-g', type=int, default=0,
                         help='GPU ID (negative value indicates CPU)')
     parser.add_argument('--out', '-o', default='result',
                         help='Directory to output the result')
@@ -164,7 +168,7 @@ def main():
     train_iter = iterators.SerialIterator(train, batch_size=args.batchsize)
 
     updater = GAN_Updater(train_iter, gen, dis, opt,
-                          batchsize=args.batchsize, device=args.gpu, z_dim=args.z_dim)
+                          device=args.gpu, z_dim=args.z_dim)
     trainer = training.Trainer(updater, (args.epoch, 'epoch'), out=args.out)
 
     trainer.extend(extensions.dump_graph('loss'))
